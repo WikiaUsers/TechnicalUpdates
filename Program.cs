@@ -16,6 +16,10 @@ namespace TechnicalUpdates
     {
         private static readonly HttpClient client = new HttpClient();
         private static readonly Regex ThreadRegex = new Regex("<h4><a href=\"https://community.fandom.com/wiki/Thread:(\\d+)\">(.*)</a></h4>");
+        private static readonly Regex LinkRegex = new Regex("\\[\\[([^\\|]+)(?:\\|([^\\]]+))?\\]\\]");
+        private static readonly Regex ExternalLinkRegex = new Regex("\\[(https?://[^\\s]+) ([^\\]]+)\\]");
+        private static readonly Regex BoldRegex = new Regex("🇧([^🇧]+)🇧");
+        private static readonly Regex ItalicRegex = new Regex("🇮([^🇮]+)🇮");
 
         private class Thread
         {
@@ -151,11 +155,69 @@ namespace TechnicalUpdates
                 if (line.StartsWith("*"))
                 {
                     builder.Append("•");
-                    builder.Append(line.Substring(1));
+                    var replaced = ExternalLinkRegex.Replace(
+                        ItalicRegex.Replace(
+                            BoldRegex.Replace(
+                                line.Substring(1)
+                                    .Replace("'''", "🇧")
+                                    .Replace("''", "🇮"),
+                                "**$1**"
+                            ),
+                            "_$1_"
+                        ),
+                        "[$2]($1)"
+                    );
+                    var linkReplaced = replaced;
+                    var links = LinkRegex.Matches(replaced);
+                    foreach (Match match in links)
+                    {
+                        var link = match.Groups[1].Value;
+                        var text = match.Groups[2].Value;
+                        var markdownLink = $"[{(text == null ? link : text)}]({GetUrl(link)})";
+                        linkReplaced = linkReplaced.Replace(match.Groups[0].Value, markdownLink);
+                    }
+                    builder.Append(linkReplaced);
                     builder.Append("\n");
                 }
             }
             return builder.ToString();
+        }
+
+        static string GetUrl(string link)
+        {
+            string host;
+            string page;
+            if (link.StartsWith("w:c:"))
+            {
+                var split = link.Split(":", 3);
+                host = $"https://{split[2]}.fandom.com/wiki/";
+                page = split[3];
+            }
+            else if (link.StartsWith("mw:"))
+            {
+                host = "https://mediawiki.org/wiki/";
+                page = link.Split(":", 1)[1];
+            }
+            else if (link.StartsWith("wikipedia:") || link.StartsWith("wp:"))
+            {
+                host = "https://en.wikipedia.org/wiki/";
+                page = link.Split(":", 1)[1];
+            }
+            else
+            {
+                host = "https://community.fandom.com/wiki/";
+                page = link;
+            }
+            var encodedLink = Uri.EscapeUriString(link)
+                .Replace("!", "%21")
+                .Replace("'", "%27")
+                .Replace("(", "%28")
+                .Replace(")", "%29")
+                .Replace("*", "%2A")
+                .Replace("~", "%7E")
+                .Replace("%20", "_")
+                .Replace("%2F", "/");
+            return $"{host}{encodedLink}";
         }
 
         static string GetWebhookUrl()
